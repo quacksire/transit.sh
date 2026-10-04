@@ -24,8 +24,13 @@ export default {
       return env.TRANSFERS.get(env.TRANSFERS.idFromName(sendMatch[1])).fetch(request);
     }
 
+    const uploadMatch = url.pathname.match(/^\/([^/]+)\/([^/]+)$/);
+    if (request.method === "PUT" && uploadMatch && validUid(uploadMatch[1])) {
+      return env.TRANSFERS.get(env.TRANSFERS.idFromName(uploadMatch[1])).fetch(request);
+    }
+
     const uid = url.pathname.match(/^\/([^/]+)\/?$/)?.[1];
-    if (uid && validUid(uid) && (request.method === "PUT" || request.method === "GET")) {
+    if (request.method === "GET" && uid && validUid(uid)) {
       return env.TRANSFERS.get(env.TRANSFERS.idFromName(uid)).fetch(request);
     }
 
@@ -50,7 +55,7 @@ export class Transfer implements DurableObject {
   async fetch(request: Request): Promise<Response> {
     const url = new URL(request.url);
     if (request.headers.get("Upgrade")?.toLowerCase() === "websocket") return this.websocket(request);
-    if (request.method === "PUT") return this.upload(request, url.pathname.endsWith("/"));
+    if (request.method === "PUT") return this.upload(request);
     if (request.method === "GET") return this.download(request);
     return new Response("Method not allowed", { status: 405 });
   }
@@ -83,11 +88,11 @@ export class Transfer implements DurableObject {
     return new Response(null, { status: 101, webSocket: client });
   }
 
-  private async upload(request: Request, hasTrailingSlash: boolean) {
+  private async upload(request: Request) {
     if (this.metadata || !request.body) return new Response("Transfer ID is already used.", { status: 409 });
     const name = decodeURIComponent(new URL(request.url).pathname.split("/").pop() || "file").slice(0, 255);
     const size = Number(request.headers.get("content-length"));
-    if (!hasTrailingSlash || !Number.isSafeInteger(size) || size <= 0) return new Response("Content-Length and trailing slash are required", { status: 400 });
+    if (!Number.isSafeInteger(size) || size <= 0) return new Response("Content-Length is required", { status: 400 });
     this.metadata = { name, size, type: request.headers.get("content-type") || "application/octet-stream" };
     await this.state.storage.put("metadata", this.metadata);
     await this.waitForReceiver();
