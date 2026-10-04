@@ -45,7 +45,7 @@ export class Transfer implements DurableObject {
   private receiverConnected = false;
   private complete = false;
 
-  constructor(private readonly state: DurableObjectState) {
+  constructor(private readonly state: DurableObjectState, private readonly env: Env) {
     state.blockConcurrencyWhile(async () => {
       this.metadata = await state.storage.get<Metadata>("metadata");
       this.complete = (await state.storage.get<boolean>("complete")) ?? false;
@@ -101,10 +101,21 @@ export class Transfer implements DurableObject {
 
   private async download(request: Request) {
     if (!this.metadata) return new Response("Transfer not found.", { status: 404 });
-    if (!request.url.includes("download=true") && !request.headers.get("user-agent")?.toLowerCase().includes("curl")) {
-      const link = `${new URL(request.url).pathname}?download=true`;
-      const name = this.metadata.name.replace(/[<&>\"']/g, "_");
-      return new Response(`<!doctype html><meta name="viewport" content="width=device-width"><title>Transit.sh - Download</title><h1>Ready to download</h1><p><strong>File:</strong> ${name}</p><p><strong>Size:</strong> ${this.metadata.size} bytes</p><a href="${link}">Download file</a>`, { headers: { "content-type": "text/html; charset=utf-8" } });
+    const agent = request.headers.get("user-agent")?.toLowerCase() ?? "";
+    const preview = /whatsapp|facebookexternalhit|twitterbot|slackbot-linkexpanding|discordbot|googlebot|bingbot|linkedinbot|pinterestbot|telegrambot/.test(agent);
+    if (preview || (!new URL(request.url).searchParams.get("download") && !agent.includes("curl"))) {
+      const templateUrl = new URL(`/templates/${preview ? "preview" : "download"}.html`, request.url);
+      const template = await this.env.ASSETS.fetch(new Request(templateUrl));
+      const values: Record<string, string> = {
+        file_name: this.metadata.name,
+        file_size: `${this.metadata.size.toLocaleString("en-US")} bytes`,
+        file_type: this.metadata.type,
+        "receiver_connected | tojson": String(this.receiverConnected),
+      };
+      const html = (await template.text()).replace(/{{\s*(.*?)\s*}}/g, (_, key: string) =>
+        (values[key] ?? "").replace(/[&<>"']/g, character => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[character]!),
+      );
+      return new Response(html, { headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" } });
     }
     if (this.receiverConnected) return new Response("A client is already downloading this file.", { status: 409 });
     this.receiverConnected = true;
