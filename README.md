@@ -1,147 +1,90 @@
-# Transit.sh - Direct File Transfer
+# Transit.sh — Cloudflare Workers Fork
 
-[![Python Version](https://img.shields.io/badge/python-3.9%2B-blue.svg)](https://www.python.org/)
+[![Deploy to Cloudflare Workers](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/quacksire/transit.sh)
 [![License](https://img.shields.io/badge/license-Custom-lightgrey.svg)](LICENSE)
-[![GitHub stars](https://img.shields.io/github/stars/codeSamuraii/transit.sh.svg?style=social&label=Star&maxAge=2592000)](https://github.com/codeSamuraii/transit.sh/stargazers/)
 
-**Transit.sh** enables direct, client-to-client file transfers without intermediary storage. Files are streamed from sender to receiver in real time. It leverages Redis, WebSockets and FastAPI for a modern, scalable architecture.
+A **Cloudflare Workers-compatible fork** of [codeSamuraii/transit.sh](https://github.com/codeSamuraii/transit.sh), originally created by Rémi Héneault. Transfer files from sender to receiver through a streaming relay, using the browser or curl, without storing file contents on disk.
 
-> **Service Status:** The public instance at [https://transit.sh](https://transit.sh) is no longer functional.
+This fork uses **Cloudflare Workers, Durable Objects, and Workers Static Assets**, with a TypeScript backend and Wrangler for development and deployment. The Workers deployment does not require Python, Redis, or a separate server.
+
+Try it at [transit-sh.quacksire.workers.dev](https://transit-sh.quacksire.workers.dev).
+
+## Cloudflare Stack
+
+- **Workers** handles HTTP routes, WebSocket upgrades, and download responses.
+- **Durable Objects** coordinate the sender and receiver in one object per transfer ID. Object storage holds transfer metadata and status; file bytes pass through memory.
+- **Workers Static Assets** serves the original web interface, CSS, JavaScript, and page templates through the `ASSETS` binding.
+- **Wrangler** runs the app locally and deploys the Worker, assets, and Durable Object binding.
+
+File contents are not written to R2, KV, D1, or Durable Object storage. Both clients must remain connected during the transfer. This is a live relay, not a file-hosting service.
 
 ## Usage
-1.  Open [https://transit.sh](https://transit.sh) (or your local instance) in your browser.
-2.  Drag and drop a file onto the designated area or click to select a file.
-3.  A unique shareable link will be generated. Copy and send this link to the receiver.
-4.  Wait for the receiver to start the download. The progress will be displayed.
 
-## Features
+### Browser
 
-*   **Direct Transfer**: Files are streamed directly between peers, not stored on the server.
-*   **Multiple Interfaces**:
-    *   Web UI for drag-and-drop uploads.
-    *   cURL-friendly HTTP endpoints for command-line usage.
-*   **No Sign-up Required**: Generate a unique link and share it.
-*   **Lightweight & Fast**: Built with FastAPI, Redis, Uvicorn, and asyncio for high performance.
+1. Open your deployed instance and select or drop a file.
+2. Copy the generated link and send it to the receiver.
+3. Keep the sender tab open while the receiver opens the link and clicks **Download File**.
 
-## How It Works
+### Terminal upload → browser download
 
-Transit.sh orchestrates a direct data stream between a sender and a receiver, using a Redis backend for signaling and temporary chunk buffering. The server acts as a smart pipe, ensuring the sender only transmits data when the receiver is ready, and that data is forwarded in real-time without being stored on disk.
-
-1.  **Initiation (Sender)**:
-    *   A sender initiates a transfer, for example, by dropping a file in the web UI. A unique transfer ID is generated.
-    *   A WebSocket connection is established to the `/send/{transfer-id}` endpoint.
-    *   The client sends a JSON message containing the file's metadata (name, size, type).
-    *   On the server, a `FileTransfer` object is created, and the metadata is stored in a Redis key with a set expiration time.
-
-2.  **Waiting for Receiver (Sender)**:
-    *   The sender's connection is held open. The server process handling the sender now subscribes to a unique Redis Pub/Sub channel for this specific transfer (e.g., `transfer:{transfer-id}:client_connected`).
-    *   The sender waits for a "receiver connected" signal on this channel. This is a blocking operation that prevents any file data from being sent until the receiver is present.
-
-3.  **Connection (Receiver)**:
-    *   The receiver uses the shared link to access `/{transfer-id}`.
-    *   The server retrieves the file metadata from Redis to serve a download page or prepare for a direct download (e.g., for `cURL`).
-    *   When the download is initiated, the server publishes a message to the transfer's specific Pub/Sub channel.
-
-4.  **Data Streaming**:
-    *   The message published by the receiver's process is received by the sender's process, unblocking the wait step.
-    *   The sender's client is now instructed to start sending file data.
-    *   Chunks of the file are sent over the WebSocket connection. Each chunk is pushed into a Redis list, which serves as a temporary, in-memory queue for the transfer.
-    *   The receiver's process, which has been waiting since it connected, starts pulling chunks from the Redis list as they arrive.
-    *   These chunks are immediately streamed to the receiver over an HTTP connection.
-    *   A simple backpressure mechanism is in place: the sender will pause if the Redis list (queue) grows too large, ensuring the sender doesn't overwhelm a slower receiver.
-
-5.  **Completion & Cleanup**:
-    *   Once the sender has sent all the file's bytes, it places a special `DONE_FLAG` in the queue.
-    *   When the receiver reads this flag, it knows the transfer is complete.
-    *   If either party disconnects prematurely, an `INTERRUPT` flag is set, which terminates the transfer on the other end.
-    *   After the transfer is finished or has failed, a cleanup process removes all associated keys (metadata, queue, event flags) from Redis.
-
-This architecture ensures that the file data is never stored at rest on the server, flowing from sender to receiver with minimal buffering in Redis.
-
-## Local Development & Deployment
-
-### Prerequisites
-
-*   Python 3.9+
-*   Redis server running
-
-### Setup
-
-1.  **Clone the repository:**
-    ```bash
-    git clone https://github.com/codeSamuraii/transit.sh.git
-    cd transit.sh
-    ```
-
-2.  **Create a virtual environment (recommended):**
-    ```bash
-    python -m venv venv
-    source venv/bin/activate  # On Windows: venv\Scripts\activate
-    ```
-
-3.  **Install dependencies:**
-    ```bash
-    pip install -r requirements.txt
-    ```
-
-4.  **Configure environment variables (optional):**
-    Create a `.env` file or set environment variables directly:
-    *   `REDIS_URL`: Defaults to `redis://localhost:6379`.
-    *   `SENTRY_DSN`: For Sentry error tracking (optional).
-
-### Running the Application
-Ensure your Redis server is running and accessible at the configured URL.
-
-For local development:
 ```bash
-python -u app.py
+curl --fail-with-body -T "/path/to/app.aab" \
+  https://transit-sh.quacksire.workers.dev/my-transfer/
 ```
 
-For deployment:
+Keep curl running, then open [the download page](https://transit-sh.quacksire.workers.dev/my-transfer/) in a browser and click **Download File**. Replace the hostname with your own deployment when self-hosting.
+
+Use HTTPS and keep the trailing slash on the upload URL: curl appends the filename, producing `/<transfer-id>/<filename>`. Choose a fresh transfer ID for each upload using letters, numbers, and hyphens. Only one receiver can download a transfer.
+
+To receive from another terminal instead:
+
 ```bash
-uvicorn app:app --host 0.0.0.0 --port 8080
+curl --fail-with-body -JLO \
+  https://transit-sh.quacksire.workers.dev/my-transfer/
 ```
 
-### Cloudflare Workers
+## Development and Deployment
 
-The Worker implementation uses a Durable Object per transfer ID and Workers
-Assets for the web UI. It does not require Redis or a Python runtime.
+Use the **Deploy to Cloudflare Workers** button above, or deploy with Wrangler. You will need Node.js/npm and a Cloudflare account for deployment.
 
 ```bash
-npm install -D wrangler typescript @cloudflare/workers-types
-npx wrangler dev
+git clone https://github.com/quacksire/transit.sh.git
+cd transit.sh
+npm ci
+npm run dev
+```
+
+Wrangler prints the local URL. To check types and deploy:
+
+```bash
+npm run check
+npx wrangler login
 npx wrangler deploy
 ```
 
-The existing FastAPI app remains available for self-hosted deployments. The
-Workers version keeps transfer bytes in the active Durable Object only; files
-are not written to R2 or persistent storage. A sender and receiver must remain
-connected during a transfer, and the current in-memory relay is intended for
-the same short-lived transfer workload as the original service.
+`wrangler.toml` configures the `TRANSFERS` Durable Object binding, its SQLite-backed class migration, and the `ASSETS` binding. Worker-first routing ensures browser visits to transfer links reach the download handler rather than a static homepage fallback.
 
-> **Note:** The API supports multiple workers on different machines as long as the Redis cache is accessible on all of them, ideally with low latency. Accessing Redis over the internet would drastically reduce transfers speeds.
+### Transfer regression test
+
+With the local development server running:
+
+```bash
+TRANSIT_URL=http://localhost:8787 node tests/workers-e2e.mjs
+```
+
+Set `TRANSIT_URL` to your deployed URL to test a live instance. The test creates its own transfer, requests the original download page with browser navigation headers, and compares the downloaded bytes with a 2 MiB random payload.
+
+## Original Python Backend
+
+The original FastAPI/Redis implementation remains in `app.py`, `views/`, and `lib/` for self-hosting. It is separate from the Workers entry point in `worker/index.ts`. Its dependencies are listed in `pyproject.toml`; the Cloudflare deployment uses `package.json` and does not run the Python backend.
 
 ## Contributing
 
-Contributions are welcome! Please feel free to submit pull requests or open issues for bugs, feature requests, or improvements.
+Issues and pull requests are welcome at [quacksire/transit.sh](https://github.com/quacksire/transit.sh). Please include reproduction steps and whether the issue affects the Workers or Python backend.
 
-1.  Fork the repository.
-2.  Create a new branch (`git checkout -b feature/your-feature-name`).
-3.  Make your changes.
-4.  Commit your changes (`git commit -am 'Add some feature'`).
-5.  Push to the branch (`git push origin feature/your-feature-name`).
-6.  Create a new Pull Request.
+## License and Attribution
 
-## License
+This fork retains the original project's [custom license](LICENSE) and attribution to Rémi Héneault. The license allows non-commercial use and forks under the same terms; commercial use is prohibited. See the license for the full terms.
 
-This project is licensed under a custom license for now. See the [LICENSE](LICENSE) file for details.
-Briefly:
-- Free for non-commercial use.
-- Forks are allowed under the same license with attribution.
-- Forks under a different license require the author's authorization.
-- Commercial use is prohibited.
-
-I want to use a more standard open-source license in the future, such as AGPLv3 or MPL 2.0, but for now, please refer to the [LICENSE](LICENSE) file for the current terms.
-
-## Acknowledgements
-*   Inspired by [transfer.sh](https://github.com/dutchcoders/transfer.sh) and [JustBeamIt](https://www.justbeamit.com/)
+Original project: [codeSamuraii/transit.sh](https://github.com/codeSamuraii/transit.sh), inspired by [transfer.sh](https://github.com/dutchcoders/transfer.sh) and [JustBeamIt](https://www.justbeamit.com/).
