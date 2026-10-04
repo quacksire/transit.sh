@@ -1,5 +1,7 @@
 # Transit.sh
 
+[![Deploy to Cloudflare Workers](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/quacksire/transit.sh)
+
 A Cloudflare Workers-compatible fork of Transit.sh. Stream files between clients without storing them on disk.
 
 ## Usage
@@ -32,8 +34,6 @@ npx wrangler deploy
 - Static Assets serves the web interface.
 
 File bytes pass through memory.
-
-[![Deploy to Cloudflare Workers](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/quacksire/transit.sh)
 
 ## License
 
