@@ -1,0 +1,16 @@
+name = "transit-sh"
+main = "worker/index.ts"
+compatibility_date = "2026-10-03"
+
+[assets]
+directory = "./static"
+binding = "ASSETS"
+not_found_handling = "single-page-application"
+
+[[durable_objects.bindings]]
+name = "TRANSFERS"
+class_name = "Transfer"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["Transfer"]

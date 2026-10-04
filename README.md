@@ -102,6 +102,23 @@ For deployment:
 uvicorn app:app --host 0.0.0.0 --port 8080
 ```
 
+### Cloudflare Workers
+
+The Worker implementation uses a Durable Object per transfer ID and Workers
+Assets for the web UI. It does not require Redis or a Python runtime.
+
+```bash
+npm install -D wrangler typescript @cloudflare/workers-types
+npx wrangler dev
+npx wrangler deploy
+```
+
+The existing FastAPI app remains available for self-hosted deployments. The
+Workers version keeps transfer bytes in the active Durable Object only; files
+are not written to R2 or persistent storage. A sender and receiver must remain
+connected during a transfer, and the current in-memory relay is intended for
+the same short-lived transfer workload as the original service.
+
 > **Note:** The API supports multiple workers on different machines as long as the Redis cache is accessible on all of them, ideally with low latency. Accessing Redis over the internet would drastically reduce transfers speeds.
 
 ## Contributing
